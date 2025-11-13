@@ -3,5 +3,5 @@ uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 pytest
 locust
-httpx
+httpx<0.28
 requests

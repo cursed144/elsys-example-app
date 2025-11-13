@@ -8,6 +8,8 @@ venv/
 env/
 ENV/
 .venv
+.order
+.pytest_cache
 
 # Storage directory
 storage/

@@ -48,12 +48,12 @@ jobs:
         run: |
           locust -f locustfile.py --headless -u 10 -r 5 -t 30s --host http://127.0.0.1:8000
 
-      - name: (optional) show uvicorn log on failure
+      - name: Show uvicorn log on failure
         if: failure()
         run: cat uvicorn.log || true
 
   cd-main:
-    name: Build Docker image on push to main (CD)
+    name: Build & (optionally) push Docker image on push to main
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
@@ -79,30 +79,19 @@ jobs:
           IMAGE_NAME: ${{ github.repository }}
           SHA_TAG: ${{ github.sha }}
         run: |
-          IMAGE=${IMAGE_NAME}
-          SHA=${SHA_TAG}
-          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${SHA}" .
-          docker images --filter=reference="${IMAGE}*"
-
-            - name: Build Docker image and tag (latest + SHA)
-        env:
-          IMAGE_NAME: ${{ github.repository }}
-          SHA_TAG: ${{ github.sha }}
-        run: |
-          IMAGE=${IMAGE_NAME}
-          SHA=${SHA_TAG}
-          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${SHA}" .
-          docker images --filter=reference="${IMAGE}*"
+          echo "Building image ${IMAGE_NAME}:latest and ${IMAGE_NAME}:${SHA_TAG}"
+          docker build -t "${IMAGE_NAME}:latest" -t "${IMAGE_NAME}:${SHA_TAG}" .
+          docker images --filter=reference="${IMAGE_NAME}*"
 
       - name: Push images (only if DOCKER credentials provided)
         run: |
-          # Проверяваме в shell дали secrets са зададени; това НЕ използва 'if:' expression
+          # If secrets are present, log in and push; otherwise skip push.
           if [ -n "${{ secrets.DOCKER_USERNAME }}" ] && [ -n "${{ secrets.DOCKER_PASSWORD }}" ]; then
-            echo "Credentials present — login + push images"
+            echo "DOCKER credentials found — logging in and pushing images"
             echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
             IMAGE=${{ github.repository }}
             docker push "${IMAGE}:latest"
             docker push "${IMAGE}:${{ github.sha }}"
           else
-            echo "DOCKER credentials not configured — skipping push."
+            echo "DOCKER_USERNAME / DOCKER_PASSWORD not set — skipping image push"
           fi

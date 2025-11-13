@@ -84,16 +84,25 @@ jobs:
           docker build -t "${IMAGE}:latest" -t "${IMAGE}:${SHA}" .
           docker images --filter=reference="${IMAGE}*"
 
-      - name: Login to Docker (only if secrets provided)
-        if: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_PASSWORD != '' }}
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Push images (only if logged in)
-        if: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_PASSWORD != '' }}
+            - name: Build Docker image and tag (latest + SHA)
+        env:
+          IMAGE_NAME: ${{ github.repository }}
+          SHA_TAG: ${{ github.sha }}
         run: |
-          IMAGE=${{ github.repository }}
-          docker push "${IMAGE}:latest"
-          docker push "${IMAGE}:${{ github.sha }}"
+          IMAGE=${IMAGE_NAME}
+          SHA=${SHA_TAG}
+          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${SHA}" .
+          docker images --filter=reference="${IMAGE}*"
+
+      - name: Push images (only if DOCKER credentials provided)
+        run: |
+          # Проверяваме в shell дали secrets са зададени; това НЕ използва 'if:' expression
+          if [ -n "${{ secrets.DOCKER_USERNAME }}" ] && [ -n "${{ secrets.DOCKER_PASSWORD }}" ]; then
+            echo "Credentials present — login + push images"
+            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+            IMAGE=${{ github.repository }}
+            docker push "${IMAGE}:latest"
+            docker push "${IMAGE}:${{ github.sha }}"
+          else
+            echo "DOCKER credentials not configured — skipping push."
+          fi

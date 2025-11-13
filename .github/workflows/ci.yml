@@ -2,7 +2,6 @@ name: CI / CD
 
 on:
   pull_request:
-    # run on all PRs; може да се ограничи с paths ако искате
     types: [opened, synchronize, reopened]
   push:
     branches:
@@ -24,18 +23,19 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # ако имате requirements.txt — опитай да го инсталираш, иначе инсталирай основните нужни инструменти
-          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
-          pip install pytest locust uvicorn requests
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            # инсталираме нужните пакети като fallback
+            pip install fastapi[all] uvicorn pytest locust httpx requests
+          fi
 
       - name: Run unit tests (pytest)
         run: pytest -q
 
       - name: Start application (uvicorn) in background
         run: |
-          # стартираме приложението на localhost:8000 в бекграунд
           nohup python -m uvicorn main:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
-          # изчакваме приложението да отговори на health endpoint
           for i in {1..15}; do
             if curl -sS http://127.0.0.1:8000/health >/dev/null 2>&1; then
               echo "app is up"
@@ -43,15 +43,13 @@ jobs:
             fi
             sleep 1
           done
-          # показваме логовете (полезно при неуспех)
           tail -n +1 uvicorn.log || true
 
       - name: Run short headless Locust load test
         run: |
-          # изисква locustfile.py в repository root
           locust -f locustfile.py --headless -u 10 -r 5 -t 30s --host http://127.0.0.1:8000
 
-      - name: (optional) show uvicorn log
+      - name: (optional) show uvicorn log on failure
         if: failure()
         run: cat uvicorn.log || true
 
@@ -63,7 +61,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up QEMU (for multi-platform builds, optional)
+      - name: Ensure Dockerfile exists
+        run: |
+          if [ ! -f Dockerfile ]; then
+            echo "ERROR: Dockerfile not found in repository root. Please add a Dockerfile to build the image." >&2
+            ls -la
+            exit 1
+          fi
+
+      - name: Set up QEMU (optional for multi-platform)
         uses: docker/setup-qemu-action@v2
 
       - name: Set up Docker Buildx
@@ -71,27 +77,23 @@ jobs:
 
       - name: Build Docker image and tag (latest + SHA)
         env:
-          IMAGE_NAME: ${{ github.repository }} # "<owner>/<repo>"
-          SHORT_SHA: ${{ github.sha }} 
+          IMAGE_NAME: ${{ github.repository }}
+          SHA_TAG: ${{ github.sha }}
         run: |
-          # Опция: можете да промените IMAGE_NAME на ghcr.io/OWNER/REPO или dockerhub repo.
-          # Потребителите могат да предпочетат ghcr.io/${{ github.repository }} за registry.
           IMAGE=${IMAGE_NAME}
-          SHA_TAG=${SHORT_SHA}
-          echo "Building Docker image ${IMAGE}:latest and ${IMAGE}:${SHA_TAG}"
-          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${SHA_TAG}" .
-          # Показваме локално наличните тагове за проверка
+          SHA=${SHA_TAG}
+          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${SHA}" .
           docker images --filter=reference="${IMAGE}*"
 
       - name: (optional) Push to registry if credentials provided
-        if: env.DOCKER_USERNAME && env.DOCKER_PASSWORD
+        if: secrets.DOCKER_USERNAME && secrets.DOCKER_PASSWORD
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: (optional) Push images (only if logged in)
-        if: env.DOCKER_USERNAME && env.DOCKER_PASSWORD
+        if: secrets.DOCKER_USERNAME && secrets.DOCKER_PASSWORD
         run: |
           IMAGE=${{ github.repository }}
           docker push "${IMAGE}:latest"
